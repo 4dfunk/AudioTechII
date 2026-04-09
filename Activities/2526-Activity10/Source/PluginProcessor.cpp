@@ -12,14 +12,14 @@
 //==============================================================================
 _2526Activity10AudioProcessor::_2526Activity10AudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
-     : AudioProcessor (BusesProperties()
-                     #if ! JucePlugin_IsMidiEffect
-                      #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      #endif
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                     #endif
-                       )
+    : AudioProcessor(BusesProperties()
+#if ! JucePlugin_IsMidiEffect
+#if ! JucePlugin_IsSynth
+        .withInput("Input", juce::AudioChannelSet::stereo(), true)
+#endif
+        .withOutput("Output", juce::AudioChannelSet::stereo(), true)
+#endif
+    )
 #endif
 {
 }
@@ -36,29 +36,29 @@ const juce::String _2526Activity10AudioProcessor::getName() const
 
 bool _2526Activity10AudioProcessor::acceptsMidi() const
 {
-   #if JucePlugin_WantsMidiInput
+#if JucePlugin_WantsMidiInput
     return true;
-   #else
+#else
     return false;
-   #endif
+#endif
 }
 
 bool _2526Activity10AudioProcessor::producesMidi() const
 {
-   #if JucePlugin_ProducesMidiOutput
+#if JucePlugin_ProducesMidiOutput
     return true;
-   #else
+#else
     return false;
-   #endif
+#endif
 }
 
 bool _2526Activity10AudioProcessor::isMidiEffect() const
 {
-   #if JucePlugin_IsMidiEffect
+#if JucePlugin_IsMidiEffect
     return true;
-   #else
+#else
     return false;
-   #endif
+#endif
 }
 
 double _2526Activity10AudioProcessor::getTailLengthSeconds() const
@@ -69,7 +69,7 @@ double _2526Activity10AudioProcessor::getTailLengthSeconds() const
 int _2526Activity10AudioProcessor::getNumPrograms()
 {
     return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
-                // so this should be at least 1, even if you're not really implementing programs.
+    // so this should be at least 1, even if you're not really implementing programs.
 }
 
 int _2526Activity10AudioProcessor::getCurrentProgram()
@@ -77,24 +77,32 @@ int _2526Activity10AudioProcessor::getCurrentProgram()
     return 0;
 }
 
-void _2526Activity10AudioProcessor::setCurrentProgram (int index)
+void _2526Activity10AudioProcessor::setCurrentProgram(int index)
 {
 }
 
-const juce::String _2526Activity10AudioProcessor::getProgramName (int index)
+const juce::String _2526Activity10AudioProcessor::getProgramName(int index)
 {
     return {};
 }
 
-void _2526Activity10AudioProcessor::changeProgramName (int index, const juce::String& newName)
+void _2526Activity10AudioProcessor::changeProgramName(int index, const juce::String& newName)
 {
 }
 
 //==============================================================================
-void _2526Activity10AudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void _2526Activity10AudioProcessor::prepareToPlay(double sampleRate, int numSamplesPerBlock)
 {
     // You need to initialize your variables here!
-    
+    samplingRate = sampleRate;
+    samplesPerBlock = numSamplesPerBlock;
+
+    freq = 440;
+    amp = 1;
+    phase = 0;
+
+    envSamples = samplingRate * int(envSec); // envelope length in samples
+    envTracker = 0;
 }
 
 void _2526Activity10AudioProcessor::releaseResources()
@@ -104,35 +112,35 @@ void _2526Activity10AudioProcessor::releaseResources()
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
-bool _2526Activity10AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool _2526Activity10AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
-  #if JucePlugin_IsMidiEffect
-    juce::ignoreUnused (layouts);
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
     return true;
-  #else
+#else
     // This is the place where you check if the layout is supported.
     // In this template code we only support mono or stereo.
     // Some plugin hosts, such as certain GarageBand versions, will only
     // load plugins that support stereo bus layouts.
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
 
     // This checks if the input layout matches the output layout
-   #if ! JucePlugin_IsSynth
+#if ! JucePlugin_IsSynth
     if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
         return false;
-   #endif
+#endif
 
     return true;
-  #endif
+#endif
 }
 #endif
 
-void _2526Activity10AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void _2526Activity10AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    auto totalNumInputChannels  = getTotalNumInputChannels();
+    auto totalNumInputChannels = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
     // In case we have more outputs than inputs, this code clears any output
@@ -142,7 +150,7 @@ void _2526Activity10AudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     // when they first compile a plugin, but obviously you don't need to keep
     // this code if your algorithm always overwrites all the output channels.
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
-        buffer.clear (i, 0, buffer.getNumSamples());
+        buffer.clear(i, 0, buffer.getNumSamples());
 
     genSineWave(buffer);
     applyEnvRamp(buffer);
@@ -152,7 +160,24 @@ void _2526Activity10AudioProcessor::genSineWave(juce::AudioBuffer<float>& buffer
 {
     // Fill the buffer (in place) with a sinusoid
     // your code goes here!
-    
+    float phaseStart = phase;
+
+    for (int channel = 0; channel < buffer.getNumChannels(); channel++) {
+        auto* channelData = buffer.getWritePointer(channel); // get address to write to
+        phase = phaseStart;
+
+        for (int i = 0; i < samplesPerBlock; i++) {
+            channelData[i] = amp * sinf(phase);
+            phase += juce::MathConstants<float>::twoPi * freq / samplingRate;
+
+            if (phase >= juce::MathConstants<float>::twoPi) { // wrap
+                phase -= juce::MathConstants<float>::twoPi;
+            }
+
+        }
+    }
+
+
 }
 
 
@@ -160,7 +185,28 @@ void _2526Activity10AudioProcessor::applyEnvRamp(juce::AudioBuffer<float>& buffe
 {
     // Apply an amplitude envelope to the buffer (in place)
     // Multiply each sample by an envelope value (0 → 1 → 0)
-    // your code goes here!
+    int envStart = envTracker;
+    float envVal;
+    float halfEnvLen = float(envSamples) / 2;
+
+    for (int channel = 0; channel < buffer.getNumChannels(); channel++) {
+        auto* channelData = buffer.getWritePointer(channel);
+        envTracker = envStart;
+
+        for (int i = 0; i < samplesPerBlock; i++) {
+            if (envTracker < halfEnvLen) { // ramp going up
+                envVal = envTracker / halfEnvLen;
+            }
+            else { // ramp going down
+                envVal = 1 - (envTracker - halfEnvLen) / halfEnvLen;
+            }
+            channelData[i] *= envVal; // apply env
+            envTracker++;
+            if (envTracker >= envSamples) { // bound by num samples
+                envTracker = 0;
+            }
+        }
+    }
 }
 
 //==============================================================================
@@ -171,18 +217,18 @@ bool _2526Activity10AudioProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* _2526Activity10AudioProcessor::createEditor()
 {
-    return new _2526Activity10AudioProcessorEditor (*this);
+    return new _2526Activity10AudioProcessorEditor(*this);
 }
 
 //==============================================================================
-void _2526Activity10AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void _2526Activity10AudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     // You should use this method to store your parameters in the memory block.
     // You could do that either as raw data, or use the XML or ValueTree classes
     // as intermediaries to make it easy to save and load complex data.
 }
 
-void _2526Activity10AudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void _2526Activity10AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     // You should use this method to restore your parameters from this memory block,
     // whose contents will have been created by the getStateInformation() call.
